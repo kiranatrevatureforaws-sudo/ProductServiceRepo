@@ -1,5 +1,5 @@
 
-name: Build and Deploy Product Service
+name: Build and deploy
 
 on:
   pull_request:
@@ -11,13 +11,8 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: product-service-production
-  cancel-in-progress: false
-
 jobs:
   build:
-    name: Build and Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -34,15 +29,20 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Build and test application
+      - name: Build and test
         run: mvn --batch-mode --no-transfer-progress clean verify
 
   deploy:
-    name: Deploy to AWS EC2
+    name: Deploy to EC2
     needs: build
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, product-service-deploy]
     timeout-minutes: 30
+
+    concurrency:
+      group: production-deployment
+      cancel-in-progress: false
+
     environment: production
 
     steps:
@@ -51,104 +51,39 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Configure SSH
-        env:
-          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
-          EC2_HOST: ${{ vars.EC2_HOST }}
-          EC2_USER: ${{ vars.EC2_USER }}
+      - name: Build Docker image
         run: |
-          set -euo pipefail
+          sudo -n docker build \
+            -t product-service:${{ github.sha }} \
+            .
 
-          : "${SSH_KEY:?Missing EC2_SSH_KEY}"
-          : "${KNOWN_HOSTS:?Missing EC2_KNOWN_HOSTS}"
-          : "${EC2_HOST:?Missing EC2_HOST}"
-          : "${EC2_USER:?Missing EC2_USER}"
-
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-
-          chmod 600 ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/known_hosts
-
-      - name: Copy application to EC2
-        env:
-          EC2_HOST: ${{ vars.EC2_HOST }}
-          EC2_USER: ${{ vars.EC2_USER }}
+      - name: Stop existing container
         run: |
-          set -euo pipefail
-
-          archive="product-service-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
-
-          tar -czf "$RUNNER_TEMP/$archive" \
-            Dockerfile pom.xml src
-
-          scp -o BatchMode=yes \
-              -o StrictHostKeyChecking=yes \
-              -o ConnectTimeout=15 \
-              "$RUNNER_TEMP/$archive" \
-              "$EC2_USER@$EC2_HOST:/tmp/$archive"
-
-          echo "Application files copied to EC2."
-
-      - name: Build and deploy Docker container
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-        run: |
-          set -euo pipefail
-
-          archive="product-service-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
-
-          ssh -o BatchMode=yes \
-              -o StrictHostKeyChecking=yes \
-              -o ConnectTimeout=15 \
-              "$EC2_USER@$EC2_HOST" \
-              bash -s -- "$archive" "$GITHUB_SHA" <<'REMOTE'
-
-          set -euo pipefail
-
-          archive="/tmp/$1"
-          image="product-service:$2"
-          build_dir=$(mktemp -d)
-
-          trap 'rm -rf -- "$build_dir"; rm -f -- "$archive"' EXIT
-
-          tar -xzf "$archive" -C "$build_dir"
-
-          sudo -n docker build -t "$image" "$build_dir"
-
           if sudo -n docker container inspect product-service >/dev/null 2>&1; then
             sudo -n docker rm -f product-service
           fi
 
+      - name: Start new container
+        run: |
           sudo -n docker run -d \
             --name product-service \
             --restart unless-stopped \
             -p 8081:8081 \
             --log-opt max-size=10m \
             --log-opt max-file=3 \
-            "$image"
+            product-service:${{ github.sha }}
 
-          echo "Waiting for application startup..."
-
+      - name: Verify application health
+        run: |
           for attempt in $(seq 1 30); do
             if curl --fail --silent --max-time 5 \
               http://localhost:8081/api/products >/dev/null; then
-              echo "Product Service deployed successfully."
+              echo "Deployment successful!"
               exit 0
             fi
             sleep 2
           done
 
-          echo "Health check failed."
+          echo "Health check failed"
           sudo -n docker logs --tail 100 product-service
           exit 1
-
-          REMOTE
-
-      - name: Remove SSH credentials
-        if: always()
-        run: |
-          rm -f ~/.ssh/id_rsa ~/.ssh/known_hosts
