@@ -17,8 +17,7 @@ public class ProductServiceImpl implements ProductService {
             new Product(1L, "Laptop", new BigDecimal("999.99"), "Electronics"),
             new Product(2L, "Smartphone", new BigDecimal("499.99"), "Electronics"),
             new Product(3L, "Desk Chair", new BigDecimal("149.99"), "Furniture"),
-            new Product(4L, "Notebook", new BigDecimal("4.99"), "Stationery"),
-            new Product(5L, "Water Bottle", new BigDecimal("19.99"), "Accessories")
+            new Product(4L, "Notebook", new BigDecimal("4.99"), "Stationery")
     ));
     private long nextId = 6;
 
