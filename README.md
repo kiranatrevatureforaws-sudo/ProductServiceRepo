@@ -85,3 +85,29 @@ or application restarts; a Docker volume does not persist this List.
 References: [Docker multi-stage builds](https://docs.docker.com/get-started/docker-concepts/building-images/multi-stage-builds/)
 and [AWS Docker installation on Amazon Linux 2023](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/create-container-image.html).
 
+## GitHub Actions deployment
+
+`.github/workflows/deploy.yml` builds and tests pull requests targeting `main`.
+Pushes to `main`, or manual runs from `main`, also build the Docker image on EC2,
+replace the `product-service` container, and check `/api/products` on port 8081.
+Deployment causes brief downtime and resets the in-memory product data. A failed
+health check fails the workflow; it does not automatically restore the old container.
+
+Create a GitHub environment named `production` and configure these environment
+secrets (repository secrets also work):
+
+| Secret | Value |
+| --- | --- |
+| `EC2_HOST` | Instance public hostname or IP address |
+| `EC2_USER` | SSH username, for example `ec2-user` |
+| `EC2_SSH_KEY` | Complete private SSH key authorized on the instance |
+| `EC2_KNOWN_HOSTS` | Verified SSH known_hosts entry for the instance hostname/IP |
+
+Obtain and verify the host key through a trusted connection before saving
+`EC2_KNOWN_HOSTS`. The workflow requires strict host-key verification.
+The instance needs Docker running, Bash, curl, tar, outbound access to Maven
+Central and Docker Hub, and passwordless `sudo` access for Docker commands.
+Allow SSH from the GitHub runner through the instance security group, and allow
+application access on port 8081 as described above. GitHub-hosted runner IPs vary;
+a runner with a fixed outbound IP can simplify the SSH rule.
+
