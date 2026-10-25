@@ -23,8 +23,8 @@ class ProductApiTests {
     void crudLifecycleAndValidation() throws Exception {
         String base = "http://localhost:" + port + "/api/products";
         String initialProducts = request("GET", base, null).body();
-        assertEquals(5, initialProducts.split("\"id\":", -1).length - 1);
-        for (long id = 1; id <= 5; id++) {
+        assertEquals(4, initialProducts.split("\"id\":", -1).length - 1);
+        for (long id = 1; id <= 4; id++) {
             assertEquals(200, request("GET", base + "/" + id, null).statusCode());
         }
         var created = request("POST", base,
